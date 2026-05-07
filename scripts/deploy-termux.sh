@@ -2,7 +2,9 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/chnsheg/WXClawBot.git}"
-APP_DIR="${APP_DIR:-$HOME/WXClawBot}"
+APP_DIR="${APP_DIR:-$HOME/apps/WXClawBot}"
+DATA_DIR="${DATA_DIR:-$HOME/.wxclawbot/data}"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/wxclawbot}"
 SERVICE_NAME="${SERVICE_NAME:-wxclawbot}"
 OPENAI_BASE_URL="${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}"
 OPENAI_MODEL="${OPENAI_MODEL:-deepseek-ai/DeepSeek-V4-Flash}"
@@ -10,6 +12,7 @@ USER_NAME="${USER_NAME:-chensheng}"
 USER_GENDER="${USER_GENDER:-male}"
 RUN_LOGIN="${RUN_LOGIN:-1}"
 OVERWRITE_ENV="${OVERWRITE_ENV:-0}"
+BACKUP_DIR="${BACKUP_DIR:-}"
 
 log() {
   printf '\n[termux-deploy] %s\n' "$*"
@@ -26,7 +29,7 @@ node_major() {
 install_packages() {
   log "Installing Termux packages."
   pkg update -y
-  pkg install -y git curl nodejs-lts openssh termux-api
+  pkg install -y git curl nodejs-lts openssh termux-api tar
 
   local major
   major="$(node_major)"
@@ -42,14 +45,51 @@ install_packages() {
   fi
 }
 
+prepare_storage_paths() {
+  if [ -z "$BACKUP_DIR" ]; then
+    if [ ! -d "$HOME/storage/shared" ] && have_cmd termux-setup-storage; then
+      log "Requesting Android shared storage permission for portable backups."
+      termux-setup-storage || true
+      sleep 3
+    fi
+
+    if [ -d "$HOME/storage/shared" ]; then
+      BACKUP_DIR="$HOME/storage/shared/WXClawBot/backups"
+    else
+      BACKUP_DIR="$HOME/.wxclawbot/backups"
+      log "Shared storage is not ready. Backups will use $BACKUP_DIR."
+    fi
+  fi
+
+  mkdir -p "$DATA_DIR" "$CONFIG_DIR" "$BACKUP_DIR" "$(dirname "$APP_DIR")"
+}
+
+write_paths_file() {
+  local paths_file="$CONFIG_DIR/paths.env"
+  log "Writing fixed path config to $paths_file."
+  {
+    printf 'APP_DIR=%q\n' "$APP_DIR"
+    printf 'DATA_DIR=%q\n' "$DATA_DIR"
+    printf 'BACKUP_DIR=%q\n' "$BACKUP_DIR"
+    printf 'CONFIG_DIR=%q\n' "$CONFIG_DIR"
+    printf 'SERVICE_NAME=%q\n' "$SERVICE_NAME"
+  } > "$paths_file"
+}
+
 clone_or_update_repo() {
   if [ -d "$APP_DIR/.git" ]; then
     log "Updating existing repo at $APP_DIR."
     git -C "$APP_DIR" pull --ff-only
-  else
-    log "Cloning $REPO_URL to $APP_DIR."
-    git clone "$REPO_URL" "$APP_DIR"
+    return
   fi
+
+  if [ -e "$APP_DIR" ] && [ "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)" -gt 0 ]; then
+    printf '%s exists and is not an empty git checkout. Set APP_DIR to another path or clean it first.\n' "$APP_DIR" >&2
+    exit 1
+  fi
+
+  log "Cloning $REPO_URL to $APP_DIR."
+  git clone "$REPO_URL" "$APP_DIR"
 }
 
 read_secret_if_needed() {
@@ -72,18 +112,17 @@ read_secret_if_needed() {
 }
 
 write_env_file() {
-  local env_file="$APP_DIR/.env"
+  local env_file="$DATA_DIR/.env"
   if [ -f "$env_file" ] && [ "$OVERWRITE_ENV" != "1" ]; then
-    log ".env already exists. Keeping it. Set OVERWRITE_ENV=1 to regenerate."
-    return
-  fi
-
-  read_secret_if_needed
-  log "Writing $env_file."
-  umask 077
-  cat > "$env_file" <<EOF
+    log "$env_file already exists. Keeping it. Set OVERWRITE_ENV=1 to regenerate."
+  else
+    read_secret_if_needed
+    log "Writing $env_file."
+    umask 077
+    cat > "$env_file" <<EOF
 CYBERBOSS_USER_NAME=$USER_NAME
 CYBERBOSS_USER_GENDER=$USER_GENDER
+CYBERBOSS_STATE_DIR=$DATA_DIR
 CYBERBOSS_WORKSPACE_ROOT=$APP_DIR
 CYBERBOSS_RUNTIME=openai
 CYBERBOSS_OPENAI_BASE_URL=$OPENAI_BASE_URL
@@ -95,6 +134,30 @@ CYBERBOSS_OPENAI_MAX_TOOL_CALLS=6
 CYBERBOSS_OPENAI_ENABLE_TOOLS=true
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 EOF
+  fi
+
+  link_env_file
+}
+
+link_env_file() {
+  local app_env="$APP_DIR/.env"
+  local env_file="$DATA_DIR/.env"
+  if [ ! -f "$env_file" ] && [ -f "$app_env" ]; then
+    log "Migrating existing $app_env to $env_file."
+    cp "$app_env" "$env_file"
+  fi
+  if [ ! -f "$env_file" ]; then
+    return
+  fi
+
+  if [ -L "$app_env" ] && [ "$(readlink "$app_env")" = "$env_file" ]; then
+    return
+  fi
+
+  if [ -e "$app_env" ] || [ -L "$app_env" ]; then
+    mv "$app_env" "$app_env.$(date +%Y%m%d-%H%M%S).bak"
+  fi
+  ln -s "$env_file" "$app_env" 2>/dev/null || cp "$env_file" "$app_env"
 }
 
 install_node_dependencies() {
@@ -103,14 +166,31 @@ install_node_dependencies() {
   npm install
 }
 
+install_control_scripts() {
+  log "Installing Termux control commands."
+  install -m 0755 "$APP_DIR/scripts/wxclawbot-termux.sh" "$PREFIX/bin/wxclawbot"
+  cat > "$PREFIX/bin/wxclawbot-start" <<'EOF'
+#!/data/data/com.termux/files/usr/bin/sh
+exec wxclawbot start "$@"
+EOF
+  cat > "$PREFIX/bin/wxclawbot-stop" <<'EOF'
+#!/data/data/com.termux/files/usr/bin/sh
+exec wxclawbot stop "$@"
+EOF
+  cat > "$PREFIX/bin/wxclawbot-restart" <<'EOF'
+#!/data/data/com.termux/files/usr/bin/sh
+exec wxclawbot restart "$@"
+EOF
+  chmod +x "$PREFIX/bin/wxclawbot-start" "$PREFIX/bin/wxclawbot-stop" "$PREFIX/bin/wxclawbot-restart"
+}
+
 login_wechat() {
   if [ "$RUN_LOGIN" != "1" ]; then
     log "Skipping WeChat login because RUN_LOGIN=$RUN_LOGIN."
     return
   fi
   log "Starting WeChat login. Use another device to scan the QR code, or scan a screenshot from WeChat album quickly."
-  cd "$APP_DIR"
-  npm run login
+  wxclawbot login
 }
 
 setup_pm2_and_boot() {
@@ -123,32 +203,30 @@ setup_pm2_and_boot() {
   termux-wake-lock || true
 
   log "Starting $SERVICE_NAME with pm2."
-  cd "$APP_DIR"
-  pm2 delete "$SERVICE_NAME" >/dev/null 2>&1 || true
-  pm2 start ./bin/cyberboss.js --name "$SERVICE_NAME" -- start --checkin
-  pm2 save
+  wxclawbot start
 
   log "Writing optional Termux:Boot script."
   mkdir -p "$HOME/.termux/boot"
   cat > "$HOME/.termux/boot/start-$SERVICE_NAME.sh" <<EOF
 #!/data/data/com.termux/files/usr/bin/sh
 termux-wake-lock
-cd "$APP_DIR"
-pm2 resurrect
+wxclawbot start
 EOF
   chmod +x "$HOME/.termux/boot/start-$SERVICE_NAME.sh"
 }
 
 main() {
   install_packages
+  prepare_storage_paths
   clone_or_update_repo
+  write_paths_file
   write_env_file
   install_node_dependencies
-  cd "$APP_DIR"
-  npm run doctor >/dev/null
+  install_control_scripts
+  wxclawbot doctor >/dev/null
   login_wechat
   setup_pm2_and_boot
-  log "Done. Use: pm2 logs $SERVICE_NAME"
+  log "Done. Use: wxclawbot status"
 }
 
 main "$@"
