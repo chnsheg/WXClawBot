@@ -14,19 +14,22 @@ const {
   loadStickerIndexSync,
 } = require("../src/services/sticker-service");
 
+const repoRoot = path.resolve(__dirname, "..");
+
 function createConfig(overrides = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-sticker-test-"));
   const stickersDir = path.join(stateDir, "stickers");
+  const stickersTemplateDir = path.join(repoRoot, "templates", "stickers");
   return {
     stateDir,
     stickersDir,
     stickerAssetsDir: path.join(stickersDir, "assets"),
     stickersIndexFile: path.join(stickersDir, "index.json"),
     stickerTagsFile: path.join(stickersDir, "tags.json"),
-    stickersTemplateDir: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers"),
-    stickersTemplateIndexFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "index.json"),
-    stickerTagsTemplateFile: path.join("/Users/tingyiwen/Dev/cyberboss", "templates", "stickers", "tags.json"),
-    stickerNormalizeGifScript: path.join("/Users/tingyiwen/Dev/cyberboss", "scripts", "normalize-sticker-gif.js"),
+    stickersTemplateDir,
+    stickersTemplateIndexFile: path.join(stickersTemplateDir, "index.json"),
+    stickerTagsTemplateFile: path.join(stickersTemplateDir, "tags.json"),
+    stickerNormalizeGifScript: path.join(repoRoot, "scripts", "normalize-sticker-gif.js"),
     accountsDir: path.join(stateDir, "accounts"),
     weixinBaseUrl: "https://ilinkai.weixin.qq.com",
     workspaceId: "default",
@@ -35,12 +38,12 @@ function createConfig(overrides = {}) {
   };
 }
 
-function writeInboxPng(config, fileName = "cat.png") {
+function writeInboxGif(config, fileName = "cat.gif") {
   const inboxDir = path.join(config.stateDir, "inbox", "2026-04-29");
   fs.mkdirSync(inboxDir, { recursive: true });
   const filePath = path.join(inboxDir, fileName);
-  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
-  fs.writeFileSync(filePath, Buffer.from(pngBase64, "base64"));
+  const gifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+  fs.writeFileSync(filePath, Buffer.from(gifBase64, "base64"));
   return filePath;
 }
 
@@ -142,7 +145,7 @@ test("sticker service exposes the current tag catalog on demand", async () => {
 test("sticker service saves inbox images as GIF stickers, grows tags, dedupes, and notifies once", async () => {
   const config = createConfig();
   const { service, sentTexts } = createService(config);
-  const inboxPath = writeInboxPng(config, "cat.png");
+  const inboxPath = writeInboxGif(config, "cat.gif");
 
   const first = await service.saveFromInbox({
     items: [{
@@ -188,8 +191,8 @@ test("sticker service saves inbox images as GIF stickers, grows tags, dedupes, a
 test("sticker service saves inbox images from an items array and keeps the tag catalog deduped", async () => {
   const config = createConfig();
   const { service, sentTexts } = createService(config);
-  const inboxPathA = writeInboxPng(config, "batch-a.png");
-  const inboxPathB = writeInboxPng(config, "batch-b.png");
+  const inboxPathA = writeInboxGif(config, "batch-a.gif");
+  const inboxPathB = writeInboxGif(config, "batch-b.gif");
 
   const batch = await service.saveFromInbox({
     items: [{
@@ -216,7 +219,7 @@ test("sticker service rejects batch saves larger than 10 items", async () => {
   const config = createConfig();
   const { service } = createService(config);
   const items = Array.from({ length: 11 }, (_, index) => ({
-    filePath: writeInboxPng(config, `oversize-${index}.png`),
+    filePath: writeInboxGif(config, `oversize-${index}.gif`),
     tags: ["可爱"],
     desc: `第${index + 1}张`,
   }));
@@ -229,7 +232,7 @@ test("sticker service rejects batch saves larger than 10 items", async () => {
 test("sticker service updates, picks, sends, and deletes saved stickers", async () => {
   const config = createConfig();
   const { service, sentTexts, sentFiles } = createService(config);
-  const inboxPath = writeInboxPng(config, "smile.png");
+  const inboxPath = writeInboxGif(config, "smile.gif");
   const saved = await service.saveFromInbox({
     items: [{
       filePath: inboxPath,

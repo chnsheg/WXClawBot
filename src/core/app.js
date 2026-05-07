@@ -7,6 +7,7 @@ const { DEFAULT_MIN_WEIXIN_CHUNK, MAX_MIN_WEIXIN_CHUNK } = require("../adapters/
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
+const { createOpenAiRuntimeAdapter } = require("../adapters/runtime/openai");
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const {
@@ -49,6 +50,11 @@ function createRuntimeAdapter(config) {
   if (config.runtime === "claudecode") {
     return createClaudeCodeRuntimeAdapter(config);
   }
+  if (config.runtime === "openai") {
+    return createOpenAiRuntimeAdapter(config, {
+      toolHost: config.projectToolHost || null,
+    });
+  }
   return createCodexRuntimeAdapter(config);
 }
 
@@ -64,7 +70,10 @@ class CyberbossApp {
     this.projectServices = projectTooling.services;
     this.projectToolHost = projectTooling.toolHost;
     this.runtimeContextStore = projectTooling.runtimeContextStore;
-    this.runtimeAdapter = createRuntimeAdapter(config);
+    this.runtimeAdapter = createRuntimeAdapter({
+      ...config,
+      projectToolHost: this.projectToolHost,
+    });
     this.threadStateStore = new ThreadStateStore();
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
     this.deferredSystemReplyQueue = new DeferredSystemReplyStore({ filePath: config.deferredSystemReplyQueueFile });
