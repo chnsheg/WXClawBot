@@ -126,35 +126,20 @@ function runTimelineCommand(binPath, args, extraEnv = {}, options = {}) {
   });
 }
 
-function buildTimelineSpawnSpec(binPath, args = []) {
-  if (IS_WINDOWS) {
+function buildTimelineSpawnSpec(binPath, args = [], options = {}) {
+  const isWindows = options.isWindows ?? IS_WINDOWS;
+  const nodePath = options.nodePath || process.execPath;
+  if (isWindows) {
     return {
-      command: "cmd.exe",
-      args: ["/d", "/s", "/c", buildWindowsNodeCommand(process.execPath, binPath, args)],
+      command: nodePath,
+      args: [binPath, ...args],
     };
   }
 
   return {
-    command: process.execPath,
+    command: nodePath,
     args: [binPath, ...args],
   };
-}
-
-function buildWindowsNodeCommand(nodePath, binPath, args = []) {
-  const commandParts = [nodePath, binPath, ...args].map(quoteWindowsCmdArg);
-  return commandParts.join(" ");
-}
-
-function quoteWindowsCmdArg(value) {
-  const text = String(value ?? "");
-  if (!text.length) {
-    return "\"\"";
-  }
-  if (!/[\s"]/u.test(text)) {
-    return text;
-  }
-  const escaped = text.replace(/(\\*)"/g, "$1$1\\\"");
-  return `"${escaped.replace(/(\\+)$/g, "$1$1")}"`;
 }
 
 function normalizeArgs(args) {
@@ -346,6 +331,7 @@ function matchTimelineText(text, pattern) {
 module.exports = {
   createTimelineIntegration,
   buildTimelineFailureMessage,
+  buildTimelineSpawnSpec,
   detectTimelineServerStartup,
   prepareTimelineInvocation,
 };

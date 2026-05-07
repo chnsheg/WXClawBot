@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const path = require("node:path");
-const { buildTimelineFailureMessage } = require("../src/integrations/timeline");
+const { buildTimelineFailureMessage, buildTimelineSpawnSpec } = require("../src/integrations/timeline");
 
 test("timeline integration does not write child output to process stdio", async () => {
   const integrationPath = path.resolve(__dirname, "../src/integrations/timeline/index.js");
@@ -66,4 +66,14 @@ test("timeline failure message prefers the root error over stack tail", () => {
   });
   assert.match(message, /Invalid timeline event at index 1: title is missing and eventNodeId cannot backfill it/);
   assert.doesNotMatch(message, /withTimelineWriteLock/);
+});
+
+test("timeline spawn spec executes node directly when node path contains spaces", () => {
+  const spec = buildTimelineSpawnSpec("C:\\work dir\\timeline-for-agent.js", ["build"], {
+    isWindows: true,
+    nodePath: "C:\\Program Files\\nodejs\\node.exe",
+  });
+
+  assert.equal(spec.command, "C:\\Program Files\\nodejs\\node.exe");
+  assert.deepEqual(spec.args, ["C:\\work dir\\timeline-for-agent.js", "build"]);
 });
