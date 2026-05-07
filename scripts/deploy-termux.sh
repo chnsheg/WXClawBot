@@ -84,7 +84,11 @@ clone_or_update_repo() {
   fi
 
   if [ -e "$APP_DIR" ] && [ "$(find "$APP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)" -gt 0 ]; then
-    printf '%s exists and is not an empty git checkout. Set APP_DIR to another path or clean it first.\n' "$APP_DIR" >&2
+    if [ -f "$APP_DIR/package.json" ]; then
+      log "Using existing source checkout at $APP_DIR."
+      return
+    fi
+    printf '%s exists and is not an empty WXClawBot checkout. Set APP_DIR to another path or clean it first.\n' "$APP_DIR" >&2
     exit 1
   fi
 
